@@ -11,7 +11,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 # export NCCL_SOCKET_TIMEOUT_MS=360000
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
-Framework_name=QwenPI
+Framework_name=QwenGR00T
 freeze_module_list=''
 base_vlm=playground/Pretrained_models/Qwen2.5-VL-3B-Instruct-Action
 config_yaml=./examples/calvin/train_files/starvla_train_calvin.yaml
@@ -19,7 +19,7 @@ DIT_TYPE="DiT-B"
 calvin_data_root=playground/Datasets/calvin
 data_mix=calvin_task_D_D
 run_root_dir=./results/Checkpoints
-run_id=0118_starvla_qwenpi_calvin_task_D_D
+run_id=0118_starvla_qwengr00t_calvin_task_D_D
 export action_input_dim=2048
 # === End of environment variable configuration ===
 ###########################################################################################
@@ -42,7 +42,7 @@ accelerate launch \
   --datasets.vla_data.data_root_dir ${calvin_data_root}\
   --datasets.vla_data.data_mix ${data_mix} \
   --datasets.vla_data.per_device_batch_size 4 \
-  --trainer.vla_data.video_backend torchvision_av \
+  --datasets.vla_data.video_backend torchvision_av \
   --trainer.freeze_modules ${freeze_module_list} \
   --trainer.max_train_steps 30000 \
   --trainer.save_interval 10000 \

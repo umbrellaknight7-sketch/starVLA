@@ -15,8 +15,8 @@ Client-side responsibilities that REMAIN on the client:
 Exposed API:
   - ``metadata`` (dict, sent at handshake): ``action_chunk_size``,
     ``available_unnorm_keys``, ``action_keys``, ``state_keys``.
-  - ``predict_action(examples, unnorm_key=None, **kwargs)`` returns
-    ``{"actions": np.ndarray[B, T, action_dim]}``.
+  - ``predict_action(examples, unnorm_key=None, skip_action_unnorm=False, **kwargs)``
+    returns ``{"actions": np.ndarray[B, T, action_dim]}``.
 """
 
 from __future__ import annotations
@@ -127,6 +127,8 @@ class PolicyServerWrapper:
         self,
         examples: List[dict],
         unnorm_key: Optional[str] = None,
+        skip_action_unnorm: bool = False,
+        return_normalized_actions: bool = False,
         **kwargs,
     ) -> Dict[str, np.ndarray]:
         """Run the framework, then un-normalize via training-time transforms.
@@ -135,12 +137,26 @@ class PolicyServerWrapper:
             examples: list of dicts (each with ``image`` / ``lang`` / optional ``state``).
             unnorm_key: dataset key for un-normalization stats. ``None`` -->
                 use the wrapper's default (auto-picked at startup).
+            skip_action_unnorm: return the framework's raw action output as
+                ``actions`` without running inverse action transforms. Use this
+                for benchmarks whose training labels are already in env-space.
+            return_normalized_actions: alias for ``skip_action_unnorm`` kept for
+                request readability.
             **kwargs: forwarded to the framework's ``predict_action``
                 (``do_sample``, ``use_ddim``, ``num_ddim_steps``, ...).
 
         Returns:
             ``{"actions": np.ndarray[B, T, D]}`` -- un-normalized.
         """
+        out = self._framework.predict_action(examples=examples, **kwargs)
+        normalized = np.asarray(out["normalized_actions"])  # (B, T, D)
+
+        if skip_action_unnorm or return_normalized_actions:
+            return {
+                "actions": normalized,
+                "normalized_actions": normalized,
+            }
+
         effective_key = unnorm_key if unnorm_key is not None else self._default_unnorm_key
         if effective_key is None:
             if len(self._available_unnorm_keys) == 1:
@@ -151,9 +167,6 @@ class PolicyServerWrapper:
                     f"Pass one of {self._available_unnorm_keys}."
                 )
         proc = self._get_processor(effective_key)
-
-        out = self._framework.predict_action(examples=examples, **kwargs)
-        normalized = np.asarray(out["normalized_actions"])  # (B, T, D)
 
         unnorm = np.stack(
             [proc.unapply_actions(normalized[b]) for b in range(normalized.shape[0])],

@@ -44,7 +44,7 @@ from termcolor import colored
 from tqdm import tqdm
 
 from deployment.model_server.tools import image_tools
-from examples.LIBERO.eval_files.model2libero_interface import ModelClient
+from examples.calvin.eval_files.model2calvin_interface import CalvinModelClient
 
 # from calvin_env.envs.play_table_env import get_env
 
@@ -68,14 +68,13 @@ class Args:
     resize_size: int = 224
     replan_steps: int = 5
     pretrained_path: str = ""
-    unnorm_key: str = ""
 
     #################################################################################################################
     # Calvin environment-specific parameters
     #################################################################################################################
     dataset_path: str = "/path/to/calvin/task_D_D"  # Path to Calvin dataset
     calvin_config_path: str = "/path/to/calvin/calvin_models/conf"
-    eval_sequences_path: str = "/path/to/calvin/eval_sequences.json"
+    eval_sequences_path: str = "examples/calvin/eval_files/eval_sequences.json"
     num_sequences: int = 1000  # Number of evaluation sequences
     num_workers: int = 1  # For future multi-process support
     seed: int = 0
@@ -99,16 +98,8 @@ class CalvinPolicyClient:
         port: int,
         resize_size: int = 224,
         replan_steps: int = 5,
-        pretrained_path: str = "",
-        unnorm_key: str = "",
     ):
-        self.client = ModelClient(
-            policy_ckpt_path=pretrained_path,
-            host=host,
-            port=port,
-            image_size=[resize_size, resize_size],
-            unnorm_key=(unnorm_key or None),
-        )
+        self.client = CalvinModelClient(host=host, port=port)
         self.resize_size = resize_size
         self.replan_steps = replan_steps
         self.step_count = 0
@@ -141,7 +132,8 @@ class CalvinPolicyClient:
             image_tools.resize_with_pad(rgb_gripper, self.resize_size, self.resize_size)
         )
 
-        # Prepare input for policy server (aligned with eval_libero)
+        # Prepare input for policy server.  CALVIN training currently uses
+        # include_state=false, so do not add robot state for these checkpoints.
         example = {
             "image": [image, wrist_image],
             "lang": lang_annotation,
@@ -152,9 +144,9 @@ class CalvinPolicyClient:
         raw_action = model_output["raw_action"]
         world_vector = np.asarray(raw_action.get("world_vector"), dtype=np.float32).reshape(-1)
         rotation_delta = np.asarray(raw_action.get("rotation_delta"), dtype=np.float32).reshape(-1)
-        open_gripper = np.asarray(raw_action.get("open_gripper"), dtype=np.float32).reshape(-1)
+        gripper = np.asarray(raw_action.get("gripper"), dtype=np.float32).reshape(-1)
 
-        action = np.concatenate([world_vector, rotation_delta, open_gripper], axis=0).astype(np.float32)
+        action = np.concatenate([world_vector, rotation_delta, gripper], axis=0).astype(np.float32)
         self.step_count += 1
         return action
 
@@ -383,7 +375,7 @@ def rollout(
         lang_annotation = val_annotations[subtask][0]
     lang_annotation = lang_annotation.split("\n")[0]
     if "\u2019" in lang_annotation:
-        lang_annotation.replace("\u2019", "'")
+        lang_annotation = lang_annotation.replace("\u2019", "'")
     policy.reset()
     start_info = env.get_info()
 
@@ -397,7 +389,6 @@ def rollout(
         # Ensure action is writable (Calvin env modifies it in-place)
         if not action.flags.writeable:
             action = np.array(action, copy=True)
-        action[-1] = 1 if action[-1] > 0 else -1
 
         obs, _, _, current_info = env.step(action)
         if debug:
@@ -430,8 +421,6 @@ def main(args: Args):
         args.port,
         args.resize_size,
         args.replan_steps,
-        pretrained_path=args.pretrained_path,
-        unnorm_key=args.unnorm_key,
     )
     env = make_env(args.dataset_path)
 
