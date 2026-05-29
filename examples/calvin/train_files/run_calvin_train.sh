@@ -12,20 +12,20 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
 Framework_name=QwenGR00T
-freeze_module_list=''
-base_vlm=playground/Pretrained_models/Qwen2.5-VL-3B-Instruct-Action
-config_yaml=./examples/calvin/train_files/starvla_train_calvin.yaml
+freeze_module_list='qwen_vl_interface'
+base_vlm=/data/checkpoints_rui/Qwen3-VL-4B-Instruct
+config_yaml=/home/xurui/starVLA/examples/calvin/train_files/starvla_train_calvin.yaml
 DIT_TYPE="DiT-B"
-calvin_data_root=playground/Datasets/calvin
-data_mix=calvin_task_D_D
-run_root_dir=./results/Checkpoints
-run_id=0118_starvla_qwengr00t_calvin_task_D_D
+calvin_data_root=/data/dataset/calvin
+data_mix=calvin_task_D_D_v3.0
+run_root_dir=/home/xurui/starVLA/results/Checkpoints
+run_id=0118_starvla_qwengr00t_calvin_task_D_D_v3.0
 export action_input_dim=2048
 # === End of environment variable configuration ===
 ###########################################################################################
 
 
-# export WANDB_MODE=disabled
+export WANDB_MODE=disabled
 
 output_dir=${run_root_dir}/${run_id}
 mkdir -p ${output_dir}
@@ -34,7 +34,7 @@ cp $0 ${output_dir}/
 
 accelerate launch \
   --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml \
-  --num_processes 8 \
+  --num_processes 2 \
   starVLA/training/train_starvla.py \
   --config_yaml ${config_yaml} \
   --framework.name ${Framework_name} \
@@ -50,8 +50,8 @@ accelerate launch \
   --trainer.eval_interval 100 \
   --run_root_dir ${run_root_dir} \
   --run_id ${run_id} \
-  --wandb_project starVLA_Calvin \
-  --wandb_entity your_wandb_entity \
+#  --wandb_project starVLA_Calvin \
+#  --wandb_entity your_wandb_entity \
   # --is_debug True
 
 
