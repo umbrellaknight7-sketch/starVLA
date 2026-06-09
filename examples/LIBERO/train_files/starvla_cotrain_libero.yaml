@@ -1,4 +1,4 @@
-run_id: 1229_libero3vl4B_qwen3gr00t
+run_id: 1229_libero3vl4B_qwen3gr00t_state
 run_root_dir: /data/checkpoints_rui/starVLA_results
 seed: 42
 wandb_entity: your_wandb_entity
@@ -41,9 +41,10 @@ datasets:
     per_device_batch_size: 16
     load_all_data_for_training: true
     video_backend: torchvision_av
+    include_state: true
 
 trainer:
-  max_train_steps: 35000
+  max_train_steps: 40000
   num_warmup_steps: 2000
   save_interval: 5000
   eval_interval: 1000

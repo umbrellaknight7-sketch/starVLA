@@ -24,7 +24,7 @@ config_yaml=/home/xurui/starVLA/examples/LIBERO/train_files/starvla_cotrain_libe
 libero_data_root=/data/dataset/libero
 data_mix=libero_all
 run_root_dir=/data/checkpoints_rui/starVLA_results
-run_id=1229_libero3vl4B_qwen3gr00t
+run_id=1229_libero3vl4B_qwen3gr00t_state
 # === End of environment variable configuration ===
 ###########################################################################################
 
@@ -48,13 +48,13 @@ accelerate launch \
   --framework.qwenvl.base_vlm ${base_vlm} \
   --datasets.vla_data.data_root_dir ${libero_data_root}\
   --datasets.vla_data.data_mix ${data_mix} \
-  --datasets.vla_data.per_device_batch_size 16 \
+  --datasets.vla_data.per_device_batch_size 32 \
   --trainer.vla_data.video_backend torchvision_av \
   --trainer.freeze_modules ${freeze_module_list} \
-  --trainer.max_train_steps 35000 \
+  --trainer.max_train_steps 40000 \
   --trainer.save_interval 5000 \
   --trainer.logging_frequency 100 \
-  --trainer.eval_interval 1000 \
+  --trainer.eval_interval 2000 \
   --run_root_dir ${run_root_dir} \
   --run_id ${run_id} \
   #--wandb_project starVLA_Libero \

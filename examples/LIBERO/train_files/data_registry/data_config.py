@@ -22,7 +22,7 @@ class Libero4in1DataConfig:
         "state.roll",
         "state.pitch",
         "state.yaw",
-        "state.pad",
+        # "state.pad",
         "state.gripper",
     ]
     action_keys = [
@@ -59,6 +59,19 @@ class Libero4in1DataConfig:
                     "action.roll": "min_max",
                     "action.pitch": "min_max",
                     "action.yaw": "min_max",
+                },
+            ),
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(
+            apply_to=self.state_keys,
+            normalization_modes={
+                "state.x": "min_max",
+                "state.y": "min_max",
+                "state.z": "min_max",
+                "state.roll": "min_max",
+                "state.pitch": "min_max",
+                "state.yaw": "min_max",
+                "state.gripper": "binary",
                 },
             ),
         ])
