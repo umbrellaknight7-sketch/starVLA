@@ -1,5 +1,5 @@
-run_id: starvla
-run_root_dir: playground/Checkpoints
+run_id: 1229_libero3vl4B_qwen3gr00t
+run_root_dir: /data/checkpoints_rui/starVLA_results
 seed: 42
 wandb_entity: your_wandb_entity
 wandb_project: llavavla
@@ -9,7 +9,7 @@ version_id: "0.21"
 framework:
   name: QwenGR00T
   qwenvl:
-    base_vlm: ./playground/Pretrained_models/Qwen3-VL-4B-Instruct
+    base_vlm: /data/checkpoints_rui/Qwen3-VL-4B-Instruct
     attn_implementation: flash_attention_2
     vl_hidden_dim: 2048
   action_model:
@@ -28,12 +28,12 @@ datasets:
     max_pixels: 307200
     min_pixels: 784
     model_max_length: 2048
-    model_type: qwen2.5vl
+    model_type: qwen3vl
     per_device_batch_size: 4
 
   vla_data:
     dataset_py: lerobot_datasets
-    data_root_dir: playground/Datasets/LIBERO
+    data_root_dir: /data/dataset/libero
     data_mix: libero_all # libero_goal
     action_type: delta_qpos
     sequential_step_sampling: False
@@ -43,10 +43,10 @@ datasets:
     video_backend: torchvision_av
 
 trainer:
-  max_train_steps: 100000
-  num_warmup_steps: 5000
+  max_train_steps: 35000
+  num_warmup_steps: 2000
   save_interval: 5000
-  eval_interval: 100
+  eval_interval: 1000
   learning_rate:
     base: 2.5e-05
     qwen_vl_interface: 1.0e-05
