@@ -7,6 +7,8 @@
 from pathlib import Path
 from typing import Sequence
 from omegaconf import OmegaConf
+import os
+import torch.distributed as dist
 
 from starVLA.dataloader.gr00t_lerobot.datasets import LeRobotSingleDataset, LeRobotMixtureDataset
 from starVLA.dataloader.gr00t_lerobot.registry import (
@@ -18,6 +20,10 @@ from starVLA.dataloader.gr00t_lerobot.registry import (
 
 def collate_fn(batch):
     return batch
+
+
+def _debug_rank() -> str:
+    return str(dist.get_rank()) if dist.is_available() and dist.is_initialized() else "NA"
 
 def make_LeRobotSingleDataset(
     data_root_dir: Path | str,
@@ -35,19 +41,45 @@ def make_LeRobotSingleDataset(
     :param crop_obs_camera: Whether to crop the observation camera images.
     :return: A LeRobotSingleDataset object.
     """
+    rank = _debug_rank()
+    # print(
+    #     f"[STARVLA_MARK] make_LeRobotSingleDataset enter rank={rank} pid={os.getpid()} "
+    #     f"data_name={data_name} robot_type={robot_type}",
+    #     flush=True,
+    # )
     
     data_config = ROBOT_TYPE_CONFIG_MAP[robot_type]
+    # print(
+    #     f"[STARVLA_MARK] make_LeRobotSingleDataset after data_config rank={rank} pid={os.getpid()} "
+    #     f"data_name={data_name}",
+    #     flush=True,
+    # )
     modality_config = data_config.modality_config()
+    # print(
+    #     f"[STARVLA_MARK] make_LeRobotSingleDataset after modality_config rank={rank} pid={os.getpid()} "
+    #     f"data_name={data_name}",
+    #     flush=True,
+    # )
     transforms = data_config.transform()
+    # print(
+    #     f"[STARVLA_MARK] make_LeRobotSingleDataset after transform rank={rank} pid={os.getpid()} "
+    #     f"data_name={data_name}",
+    #     flush=True,
+    # )
     dataset_path = data_root_dir / data_name
     if robot_type not in ROBOT_TYPE_TO_EMBODIMENT_TAG:
-        print(f"Warning: Robot type {robot_type} not found in ROBOT_TYPE_TO_EMBODIMENT_TAG, using {EmbodimentTag.NEW_EMBODIMENT} as default")
+        # print(f"Warning: Robot type {robot_type} not found in ROBOT_TYPE_TO_EMBODIMENT_TAG, using {EmbodimentTag.NEW_EMBODIMENT} as default")
         embodiment_tag = EmbodimentTag.NEW_EMBODIMENT
     else:
         embodiment_tag = ROBOT_TYPE_TO_EMBODIMENT_TAG[robot_type]
     
     video_backend = data_cfg.get("video_backend", "decord") if data_cfg else "torchvision_av"
-    return LeRobotSingleDataset(
+    # print(
+    #     f"[STARVLA_MARK] make_LeRobotSingleDataset before LeRobotSingleDataset rank={rank} "
+    #     f"pid={os.getpid()} data_name={data_name} dataset_path={dataset_path}",
+    #     flush=True,
+    # )
+    dataset = LeRobotSingleDataset(
         dataset_path=dataset_path,
         modality_configs=modality_config,
         transforms=transforms,
@@ -56,6 +88,12 @@ def make_LeRobotSingleDataset(
         delete_pause_frame=delete_pause_frame,
         data_cfg=data_cfg,
     )
+    # print(
+    #     f"[STARVLA_MARK] make_LeRobotSingleDataset after LeRobotSingleDataset rank={rank} "
+    #     f"pid={os.getpid()} data_name={data_name}",
+    #     flush=True,
+    # )
+    return dataset
 
 def get_vla_dataset(
     data_cfg: dict,
@@ -68,10 +106,21 @@ def get_vla_dataset(
     """
     Get a LeRobotMixtureDataset object.
     """
+    rank = _debug_rank()
     data_root_dir = data_cfg.data_root_dir
     data_mix = data_cfg.data_mix
     delete_pause_frame = data_cfg.get("delete_pause_frame", False)
+    # print(
+    #     f"[STARVLA_MARK] get_vla_dataset enter rank={rank} pid={os.getpid()} "
+    #     f"data_root_dir={data_root_dir} data_mix={data_mix}",
+    #     flush=True,
+    # )
     mixture_spec = DATASET_NAMED_MIXTURES[data_mix]
+    # print(
+    #     f"[STARVLA_MARK] get_vla_dataset after mixture lookup rank={rank} pid={os.getpid()} "
+    #     f"num_specs={len(mixture_spec)}",
+    #     flush=True,
+    # )
     included_datasets, filtered_mixture_spec = set(), []
     for d_name, d_weight, robot_type in mixture_spec:  
         dataset_key = (d_name, robot_type)  
@@ -84,9 +133,31 @@ def get_vla_dataset(
 
     dataset_mixture = []
     for d_name, d_weight, robot_type in filtered_mixture_spec:
-        dataset_mixture.append((make_LeRobotSingleDataset(Path(data_root_dir), d_name, robot_type, delete_pause_frame=delete_pause_frame, data_cfg=data_cfg), d_weight))
+        # print(
+        #     f"[STARVLA_MARK] get_vla_dataset before make dataset rank={rank} pid={os.getpid()} "
+        #     f"data_name={d_name} robot_type={robot_type} weight={d_weight}",
+        #     flush=True,
+        # )
+        dataset = make_LeRobotSingleDataset(
+            Path(data_root_dir),
+            d_name,
+            robot_type,
+            delete_pause_frame=delete_pause_frame,
+            data_cfg=data_cfg,
+        )
+        # print(
+        #     f"[STARVLA_MARK] get_vla_dataset after make dataset rank={rank} pid={os.getpid()} "
+        #     f"data_name={d_name}",
+        #     flush=True,
+        # )
+        dataset_mixture.append((dataset, d_weight))
 
-    return LeRobotMixtureDataset(
+    # print(
+    #     f"[STARVLA_MARK] get_vla_dataset before LeRobotMixtureDataset rank={rank} "
+    #     f"pid={os.getpid()} num_datasets={len(dataset_mixture)}",
+    #     flush=True,
+    # )
+    mixture_dataset = LeRobotMixtureDataset(
         dataset_mixture,
         mode=mode,
         balance_dataset_weights=balance_dataset_weights,
@@ -95,6 +166,11 @@ def get_vla_dataset(
         data_cfg=data_cfg,
         **kwargs,
     )
+    # print(
+    #     f"[STARVLA_MARK] get_vla_dataset after LeRobotMixtureDataset rank={rank} pid={os.getpid()}",
+    #     flush=True,
+    # )
+    return mixture_dataset
 
 
 

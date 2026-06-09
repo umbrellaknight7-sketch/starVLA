@@ -38,9 +38,13 @@ from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
 
+# print(f"[STARVLA_MARK] before DeepSpeedPlugin pid={os.getpid()}", flush=True)
 deepspeed_plugin = DeepSpeedPlugin()
+# print(f"[STARVLA_MARK] before Accelerator pid={os.getpid()}", flush=True)
 accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
+# print(f"[STARVLA_MARK] after Accelerator pid={os.getpid()}", flush=True)
 accelerator.print(accelerator.state)
+# print(f"[STARVLA_MARK] after accelerator.state print pid={os.getpid()}", flush=True)
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -51,6 +55,18 @@ logger = get_logger(__name__)
 
 def load_fast_tokenizer():
     return AutoProcessor.from_pretrained("physical-intelligence/fast", trust_remote_code=True)
+
+
+def dist_barrier_with_device() -> None:
+    if not dist.is_initialized():
+        return
+    if torch.cuda.is_available() and dist.get_backend() == "nccl":
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        if torch.cuda.current_device() != local_rank:
+            torch.cuda.set_device(local_rank)
+        dist.barrier(device_ids=[local_rank])
+    else:
+        dist.barrier()
 
 
 def setup_directories(cfg) -> Path:
@@ -67,11 +83,17 @@ def setup_directories(cfg) -> Path:
 
 def prepare_data(cfg, accelerator, output_dir) -> DataLoader:
     """Prepare VLA training data."""
+    rank = dist.get_rank() if dist.is_initialized() else "NA"
+    # print(f"[STARVLA_MARK] prepare_data enter rank={rank} pid={os.getpid()}", flush=True)
     logger.info(f"Creating VLA Dataset with Mixture `{cfg.datasets.vla_data.data_mix}`")
+    # print(f"[STARVLA_MARK] prepare_data before build_dataloader rank={rank} pid={os.getpid()}", flush=True)
     vla_train_dataloader = build_dataloader(cfg=cfg, dataset_py=cfg.datasets.vla_data.dataset_py)
+    # print(f"[STARVLA_MARK] prepare_data after build_dataloader rank={rank} pid={os.getpid()}", flush=True)
 
     accelerator.dataloader_config.dispatch_batches = False
-    dist.barrier()
+    # print(f"[STARVLA_MARK] prepare_data before dist.barrier rank={rank} pid={os.getpid()}", flush=True)
+    dist_barrier_with_device()
+    # print(f"[STARVLA_MARK] prepare_data after dist.barrier rank={rank} pid={os.getpid()}", flush=True)
     return vla_train_dataloader
 
 
@@ -353,7 +375,7 @@ class VLATrainer(TrainerUtils):
             step_metrics["mse_score"] = score / num_pots
 
         del examples
-        dist.barrier()
+        dist_barrier_with_device()
         return step_metrics
 
     def _log_training_config(self):
@@ -417,16 +439,26 @@ class VLATrainer(TrainerUtils):
 
 
 def main(cfg) -> None:
+    # print(f"[STARVLA_MARK] enter main pid={os.getpid()}", flush=True)
     logger.info("VLA Training :: Warming Up")
 
     cfg = wrap_config(cfg)
+    # print(f"[STARVLA_MARK] after wrap_config pid={os.getpid()}", flush=True)
     logger.info("✅ Configuration wrapped for access tracking")
 
     output_dir = setup_directories(cfg=cfg)
+    # print(f"[STARVLA_MARK] after setup_directories pid={os.getpid()}", flush=True)
+    # print(f"[STARVLA_MARK] before build_framework pid={os.getpid()}", flush=True)
     vla = build_framework(cfg)
+    # print(f"[STARVLA_MARK] after build_framework pid={os.getpid()}", flush=True)
+    # print(f"[STARVLA_MARK] before prepare_data pid={os.getpid()}", flush=True)
     vla_train_dataloader = prepare_data(cfg=cfg, accelerator=accelerator, output_dir=output_dir)
+    # print(f"[STARVLA_MARK] after prepare_data pid={os.getpid()}", flush=True)
+    # print(f"[STARVLA_MARK] before setup_optimizer_and_scheduler pid={os.getpid()}", flush=True)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)
+    # print(f"[STARVLA_MARK] after setup_optimizer_and_scheduler pid={os.getpid()}", flush=True)
 
+    # print(f"[STARVLA_MARK] before VLATrainer init pid={os.getpid()}", flush=True)
     trainer = VLATrainer(
         cfg=cfg,
         model=vla,
@@ -435,12 +467,16 @@ def main(cfg) -> None:
         lr_scheduler=lr_scheduler,
         accelerator=accelerator,
     )
+    # print(f"[STARVLA_MARK] after VLATrainer init pid={os.getpid()}", flush=True)
 
+    # print(f"[STARVLA_MARK] before trainer.prepare_training pid={os.getpid()}", flush=True)
     trainer.prepare_training()
+    # print(f"[STARVLA_MARK] after trainer.prepare_training pid={os.getpid()}", flush=True)
+    # print(f"[STARVLA_MARK] before trainer.train pid={os.getpid()}", flush=True)
     trainer.train()
 
     logger.info("... and that's all, folks!")
-    dist.barrier()
+    dist_barrier_with_device()
     dist.destroy_process_group()
 
 

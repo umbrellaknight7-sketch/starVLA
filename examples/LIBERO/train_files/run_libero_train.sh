@@ -12,9 +12,9 @@ unset NCCL_IB_HCA
 export NCCL_IB_DISABLE=1
 
 # NCCL / PyTorch distributed debug settings.
-export NCCL_DEBUG=INFO
-export TORCH_NCCL_BLOCKING_WAIT=1
-export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+# export NCCL_DEBUG=INFO
+# export TORCH_NCCL_BLOCKING_WAIT=1
+# export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
 Framework_name=QwenGR00T
@@ -48,12 +48,12 @@ accelerate launch \
   --framework.qwenvl.base_vlm ${base_vlm} \
   --datasets.vla_data.data_root_dir ${libero_data_root}\
   --datasets.vla_data.data_mix ${data_mix} \
-  --datasets.vla_data.per_device_batch_size 32 \
+  --datasets.vla_data.per_device_batch_size 64 \
   --trainer.vla_data.video_backend torchvision_av \
   --trainer.freeze_modules ${freeze_module_list} \
   --trainer.max_train_steps 40000 \
   --trainer.save_interval 5000 \
-  --trainer.logging_frequency 100 \
+  --trainer.logging_frequency 1000 \
   --trainer.eval_interval 2000 \
   --run_root_dir ${run_root_dir} \
   --run_id ${run_id} \

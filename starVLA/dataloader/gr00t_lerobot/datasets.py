@@ -25,6 +25,7 @@ See `scripts/load_dataset.py` for examples on how to use these datasets.
 """
 import os
 import hashlib
+import time
 import io
 import json, torch
 import copy
@@ -38,6 +39,7 @@ from pydantic import BaseModel, Field, ValidationError
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from PIL import Image
+import torch
 import torch.distributed as dist
 
 from starVLA.dataloader.gr00t_lerobot.video import get_all_frames, get_frames_by_timestamps
@@ -66,6 +68,18 @@ LE_ROBOT_DATA_FILENAME = "data/*/*.parquet"
 LE_ROBOT_STEPS_FILENAME = "meta/steps.pkl"
 LE_ROBOT_STATS_FORMAT_VERSION = 2
 EPSILON = 5e-4
+
+
+def _dist_barrier_with_device() -> None:
+    if not dist.is_initialized():
+        return
+    if torch.cuda.is_available() and dist.get_backend() == "nccl":
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        if torch.cuda.current_device() != local_rank:
+            torch.cuda.set_device(local_rank)
+        dist.barrier(device_ids=[local_rank])
+    else:
+        dist.barrier()
 
 #  LeRobot v3.0 dataset file names 
 LE_ROBOT3_TASKS_FILENAME = "meta/tasks.parquet"
@@ -216,6 +230,48 @@ def _save_stats_cache(stats_path: Path, cache_config: dict, statistics: dict) ->
     with open(tmp_path, "w") as f:
         json.dump(payload, f, indent=4)
     os.replace(tmp_path, stats_path)
+
+
+def _wait_for_stats_cache(
+    stats_path: Path,
+    expected_config: dict,
+    *,
+    timeout_s: float = 1800.0,
+    poll_s: float = 1.0,
+) -> dict:
+    start = time.monotonic()
+    while True:
+        statistics = _load_stats_cache(
+            stats_path,
+            expected_config,
+            invalidate_legacy=False,
+        )
+        if statistics is not None:
+            return statistics
+        if time.monotonic() - start > timeout_s:
+            raise RuntimeError(
+                f"Timed out waiting for dataset statistics cache: {stats_path}"
+            )
+        time.sleep(poll_s)
+
+
+def _wait_for_pickle_cache(
+    cache_path: Path,
+    *,
+    timeout_s: float = 1800.0,
+    poll_s: float = 1.0,
+) -> dict:
+    start = time.monotonic()
+    while True:
+        if cache_path.exists():
+            try:
+                with open(cache_path, "rb") as f:
+                    return pickle.load(f)
+            except Exception:
+                pass
+        if time.monotonic() - start > timeout_s:
+            raise RuntimeError(f"Timed out waiting for cache file: {cache_path}")
+        time.sleep(poll_s)
 
 
 def _compute_statistics_for_mode(
@@ -559,6 +615,18 @@ class LeRobotSingleDataset(Dataset):
     """
     Base dataset class for LeRobot that supports sharding.
     """
+    @staticmethod
+    def _debug_rank() -> str:
+        return str(dist.get_rank()) if dist.is_initialized() else "NA"
+
+    def _debug_marker(self, message: str) -> None:
+        dataset_name = getattr(self, "_dataset_name", "NA")
+        # print(
+        #     f"[STARVLA_MARK] LeRobotSingleDataset {message} "
+        #     f"rank={self._debug_rank()} pid={os.getpid()} dataset={dataset_name}",
+        #     flush=True,
+        # )
+
     def __init__(
         self,
         dataset_path: Path | str,
@@ -583,6 +651,11 @@ class LeRobotSingleDataset(Dataset):
             transforms (ComposedModalityTransform): The transforms to apply to the dataset.
             embodiment_tag (EmbodimentTag): Overload the embodiment tag for the dataset. e.g. define it as "new_embodiment"
         """
+        # print(
+        #     f"[STARVLA_MARK] LeRobotSingleDataset __init__ enter rank={self._debug_rank()} "
+        #     f"pid={os.getpid()} dataset_path={dataset_path}",
+        #     flush=True,
+        # )
         # first check if the path directory exists
         self.data_cfg = data_cfg
         if not Path(dataset_path).exists():
@@ -610,32 +683,62 @@ class LeRobotSingleDataset(Dataset):
         else:
             self.tag = embodiment_tag
 
+        self._debug_marker("before _init_action_mode")
         self._init_action_mode()
+        self._debug_marker("after _init_action_mode")
+        self._debug_marker("before _get_metadata")
         self._metadata = self._get_metadata(EmbodimentTag(self.tag))
+        self._debug_marker("after _get_metadata")
 
         # LeRobot-specific config
+        self._debug_marker("before _get_lerobot_modality_meta")
         self._lerobot_modality_meta = self._get_lerobot_modality_meta()
+        self._debug_marker("after _get_lerobot_modality_meta")
+        self._debug_marker("before _get_lerobot_info_meta")
         self._lerobot_info_meta = self._get_lerobot_info_meta()
+        self._debug_marker("after _get_lerobot_info_meta")
+        self._debug_marker("before _get_data_path_pattern")
         self._data_path_pattern = self._get_data_path_pattern()
+        self._debug_marker("after _get_data_path_pattern")
+        self._debug_marker("before _get_video_path_pattern")
         self._video_path_pattern = self._get_video_path_pattern()
+        self._debug_marker("after _get_video_path_pattern")
+        self._debug_marker("before _get_chunk_size")
         self._chunk_size = self._get_chunk_size()
+        self._debug_marker("after _get_chunk_size")
+        self._debug_marker("before _get_tasks")
         self._tasks = self._get_tasks()
+        self._debug_marker("after _get_tasks")
         # self._episodes = self._get_episode_info() # TODO why we need this func
         self.curr_traj_data = None
         self.curr_traj_id = None
 
+        self._debug_marker("before _get_trajectories")
         self._trajectory_ids, self._trajectory_lengths = self._get_trajectories()
+        self._debug_marker("after _get_trajectories")
+        self._debug_marker("before _get_modality_keys")
         self._modality_keys = self._get_modality_keys()
+        self._debug_marker("after _get_modality_keys")
+        self._debug_marker("before _get_delta_indices")
         self._delta_indices = self._get_delta_indices()
+        self._debug_marker("after _get_delta_indices")
+        self._debug_marker("before _get_all_steps")
         self._all_steps = self._get_all_steps()
+        self._debug_marker("after _get_all_steps")
+        self._debug_marker("before set_transforms_metadata")
         self.set_transforms_metadata(self.metadata)
+        self._debug_marker("after set_transforms_metadata")
+        self._debug_marker("before set_epoch")
         self.set_epoch(0)
+        self._debug_marker("after set_epoch")
 
         print(f"Initialized dataset {self.dataset_name} with {embodiment_tag}")
 
 
         # Check if the dataset is valid
+        self._debug_marker("before _check_integrity")
         self._check_integrity()
+        self._debug_marker("after _check_integrity")
 
     @property
     def dataset_path(self) -> Path:
@@ -734,6 +837,7 @@ class LeRobotSingleDataset(Dataset):
         Returns:
             dict: The metadata for the dataset.
         """
+        self._debug_marker("_get_metadata enter")
 
         # 1. Modality metadata
         modality_meta_path = self.dataset_path / LE_ROBOT_MODALITY_FILENAME
@@ -828,6 +932,7 @@ class LeRobotSingleDataset(Dataset):
         ]
 
         if is_main():
+            self._debug_marker("_get_metadata before _load_or_compute_statistics")
             le_statistics = _load_or_compute_statistics(
                 stats_path,
                 stats_cache_config=stats_cache_config,
@@ -842,22 +947,17 @@ class LeRobotSingleDataset(Dataset):
                 action_mode_apply_keys=apply_keys,
                 action_mode_state_map=normalized_state_map,
             )
+            self._debug_marker("_get_metadata after _load_or_compute_statistics")
         else:
             le_statistics = None
 
-        if dist.is_initialized():
-            dist.barrier()
-
         if le_statistics is None:
-            le_statistics = _load_stats_cache(
+            self._debug_marker("_get_metadata before wait stats cache")
+            le_statistics = _wait_for_stats_cache(
                 stats_path,
                 stats_cache_config,
-                invalidate_legacy=False,
             )
-            if le_statistics is None:
-                raise RuntimeError(
-                    f"Dataset statistics cache is missing or invalid after sync: {stats_path}"
-                )
+            self._debug_marker("_get_metadata after wait stats cache")
 
         for stat in le_statistics.values():
             DatasetStatisticalValues.model_validate(stat)
@@ -886,6 +986,7 @@ class LeRobotSingleDataset(Dataset):
             embodiment_tag=embodiment_tag,
         )
 
+        self._debug_marker("_get_metadata return")
         return metadata
 
     def _get_trajectories(self) -> tuple[np.ndarray, np.ndarray]:
@@ -969,6 +1070,7 @@ class LeRobotSingleDataset(Dataset):
         Returns:
             list[tuple[str, int]]: A list of (trajectory_id, base_index) tuples.
         """
+        self._debug_marker("_get_all_steps enter")
         def is_main():
             return (not dist.is_initialized()) or dist.get_rank() == 0
     
@@ -979,8 +1081,10 @@ class LeRobotSingleDataset(Dataset):
         # ---------- try to read from cache  ----------
         if steps_path.exists():
             try:
+                self._debug_marker("_get_all_steps before read existing steps cache")
                 with open(steps_path, "rb") as f:
                     cached_data = pickle.load(f)
+                self._debug_marker("_get_all_steps after read existing steps cache")
                 return cached_data["steps"]
             except Exception as e:
                 # include EOFError / PickleError / KeyError
@@ -991,7 +1095,9 @@ class LeRobotSingleDataset(Dataset):
     
         # ---------- only build by rank0  ----------
         if is_main():
+            self._debug_marker("_get_all_steps before _get_all_steps_single_process")
             all_steps = self._get_all_steps_single_process()
+            self._debug_marker("_get_all_steps after _get_all_steps_single_process")
     
             cache_data = {
                 "config_key": config_key,
@@ -1010,14 +1116,16 @@ class LeRobotSingleDataset(Dataset):
             os.replace(tmp_path, steps_path)
     
             print(f"[RANK 0] Cached steps saved to {steps_path}")
-    
-        # ---------- sync after rank0  ----------
-        if dist.is_initialized():
-            dist.barrier()
+        elif dist.is_initialized():
+            self._debug_marker("_get_all_steps before wait steps cache")
+            _wait_for_pickle_cache(steps_path)
+            self._debug_marker("_get_all_steps after wait steps cache")
     
         # ---------- read by all rank ----------
+        self._debug_marker("_get_all_steps before read rebuilt steps cache")
         with open(steps_path, "rb") as f:
             cached_data = pickle.load(f)
+        self._debug_marker("_get_all_steps after read rebuilt steps cache")
     
         return cached_data["steps"]
 

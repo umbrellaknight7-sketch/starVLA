@@ -34,24 +34,44 @@ def save_dataset_statistics(dataset_statistics, run_dir):
 
 
 def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here only is get dataset, we need mv dataloader to here
+    rank = dist.get_rank() if dist.is_initialized() else "NA"
+    # print(
+    #     f"[STARVLA_MARK] build_dataloader enter rank={rank} pid={os.getpid()} dataset_py={dataset_py}",
+    #     flush=True,
+    # )
 
     if dataset_py == "lerobot_datasets":
+        # print(f"[STARVLA_MARK] build_dataloader before import lerobot rank={rank} pid={os.getpid()}", flush=True)
         from starVLA.dataloader.lerobot_datasets import get_vla_dataset, collate_fn
+        # print(f"[STARVLA_MARK] build_dataloader after import lerobot rank={rank} pid={os.getpid()}", flush=True)
         vla_dataset_cfg = cfg.datasets.vla_data
 
+        # print(f"[STARVLA_MARK] build_dataloader before get_vla_dataset rank={rank} pid={os.getpid()}", flush=True)
         vla_dataset = get_vla_dataset(data_cfg=vla_dataset_cfg)
+        # print(f"[STARVLA_MARK] build_dataloader after get_vla_dataset rank={rank} pid={os.getpid()}", flush=True)
         
+        # print(f"[STARVLA_MARK] build_dataloader before DataLoader rank={rank} pid={os.getpid()}", flush=True)
         vla_train_dataloader = DataLoader(
             vla_dataset,
             batch_size=cfg.datasets.vla_data.per_device_batch_size,
             collate_fn=collate_fn,
             num_workers=4,
             # shuffle=True
-        )        
+        )
+        # print(f"[STARVLA_MARK] build_dataloader after DataLoader rank={rank} pid={os.getpid()}", flush=True)
         if dist.get_rank() == 0: 
             
             output_dir = Path(cfg.output_dir)
+            # print(
+            #     f"[STARVLA_MARK] build_dataloader before save_dataset_statistics rank={rank} pid={os.getpid()}",
+            #     flush=True,
+            # )
             vla_dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
+        #     print(
+        #         f"[STARVLA_MARK] build_dataloader after save_dataset_statistics rank={rank} pid={os.getpid()}",
+        #         flush=True,
+        #     )
+        # print(f"[STARVLA_MARK] build_dataloader return rank={rank} pid={os.getpid()}", flush=True)
         return vla_train_dataloader
     elif dataset_py == "vlm_datasets":
         vlm_data_module = make_vlm_dataloader(cfg)
