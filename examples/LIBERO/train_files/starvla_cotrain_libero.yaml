@@ -1,4 +1,4 @@
-run_id: 1229_libero3vl4B_qwen3gr00t_state
+run_id: 1230_libero3vl4B_qwen3gr00t_state_nofreeze
 run_root_dir: /data/checkpoints_rui/starVLA_results
 seed: 42
 wandb_entity: your_wandb_entity
@@ -44,10 +44,10 @@ datasets:
     include_state: true
 
 trainer:
-  max_train_steps: 40000
+  max_train_steps: 30000
   num_warmup_steps: 2000
   save_interval: 5000
-  eval_interval: 1000
+  eval_interval: 2000
   learning_rate:
     base: 2.5e-05
     qwen_vl_interface: 1.0e-05
@@ -55,7 +55,7 @@ trainer:
   lr_scheduler_type: cosine_with_min_lr
   scheduler_specific_kwargs:
     min_lr: 1.0e-06
-  freeze_modules: 'qwen_vl_interface'
+  freeze_modules: ''
   loss_scale:
     vla: 1.0
     vlm: 0.1

@@ -3,8 +3,8 @@ export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=/usr/local/cuda-12.4/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}
 # Use only GPU 0 and GPU 1.
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-export NUM_PROCESSES=4
+export CUDA_VISIBLE_DEVICES=0,1
+export NUM_PROCESSES=2
 export NCCL_P2P_LEVEL=PIX
 
 # Do not force a possibly wrong NIC / IB device.
@@ -22,13 +22,13 @@ export NCCL_DEBUG=INFO
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
 Framework_name=QwenGR00T
-freeze_module_list='qwen_vl_interface'
+freeze_module_list=''
 base_vlm=/data/checkpoints_rui/Qwen3-VL-4B-Instruct
 config_yaml=/home/xurui/starVLA/examples/LIBERO/train_files/starvla_cotrain_libero.yaml
 libero_data_root=/data/dataset/libero
 data_mix=libero_all
 run_root_dir=/data/checkpoints_rui/starVLA_results
-run_id=1229_libero3vl4B_qwen3gr00t_state
+run_id=1230_libero3vl4B_qwen3gr00t_state_nofreeze
 # === End of environment variable configuration ===
 ###########################################################################################
 
@@ -45,8 +45,8 @@ cp $0 ${output_dir}/
 
 accelerate launch \
   --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml \
-  --num_processes 4 \
-  starVLA/training/train_starvla.py \
+  --num_processes 2 \
+  starVLA/training/train_starvla_cotrain.py \
   --config_yaml ${config_yaml} \
   --framework.name ${Framework_name} \
   --framework.qwenvl.base_vlm ${base_vlm} \

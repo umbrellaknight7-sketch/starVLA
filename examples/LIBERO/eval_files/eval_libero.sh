@@ -4,7 +4,7 @@ STARVLA_DIR=/home/xurui/starVLA
 
 cd ${STARVLA_DIR}
 # === Checkpoint ===
-CKPT=/data/checkpoints_rui/starVLA_results/1229_libero3vl4B_qwen3gr00t/final_model/pytorch_model.pt
+CKPT=/data/checkpoints_rui/starVLA_results/1229_libero3vl4B_qwen3gr00t_state/checkpoints/steps_25000_pytorch_model.pt
 
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
@@ -32,7 +32,7 @@ model_root=$(echo "$your_ckpt" | awk -F'/checkpoints/' '{print $1}')
 ###########################################################################################
 
 task_suite_name=libero_goal
-num_trials_per_task=20
+num_trials_per_task=50
 video_out_path="/home/xurui/starVLA/results/${task_suite_name}/${folder_name}"
 
 ${LIBERO_Python} ./examples/LIBERO/eval_files/eval_libero.py \

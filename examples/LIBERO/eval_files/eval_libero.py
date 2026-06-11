@@ -148,13 +148,14 @@ def eval_libero(args: Args) -> None:
                 # Save preprocessed image for replay video
                 replay_images.append(img)
 
-                state = np.concatenate(
+                state8 = np.concatenate(
                     (
                         obs["robot0_eef_pos"],
                         _quat2axisangle(obs["robot0_eef_quat"]),
                         obs["robot0_gripper_qpos"],
                     )
                 )
+                state = np.concatenate((state8[:6], state8[7:8]))
 
                 observation = {  #
                     "observation.primary": np.expand_dims(img, axis=0),  # (H, W, C), dtype=unit8, range(0-255)
@@ -167,6 +168,7 @@ def eval_libero(args: Args) -> None:
                 example_dict = {
                     "image": [observation["observation.primary"][0], observation["observation.wrist_image"][0]],
                     "lang": observation["instruction"][0],
+                    "state": observation["observation.state"],
                 }
 
                 start_time = time.time()
