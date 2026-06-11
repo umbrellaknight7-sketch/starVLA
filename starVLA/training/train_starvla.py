@@ -136,6 +136,10 @@ class VLATrainer(TrainerUtils):
         self.accelerator = accelerator
 
         self.completed_steps = 0
+        (
+            self.gradient_accumulation_steps,
+            self.gradient_accumulation_source,
+        ) = self._resolve_gradient_accumulation_steps()
         self.total_batch_size = self._calculate_total_batch_size()
 
     def prepare_training(self):
@@ -165,15 +169,95 @@ class VLATrainer(TrainerUtils):
             self.optimizer,
             self.vla_train_dataloader,
         )
+        (
+            self.gradient_accumulation_steps,
+            self.gradient_accumulation_source,
+        ) = self._resolve_gradient_accumulation_steps()
+        self.total_batch_size = self._calculate_total_batch_size()
 
         self._init_wandb()
 
+    @staticmethod
+    def _read_int_value(obj, name):
+        """Read an int from an attribute or zero-arg method when available."""
+        if obj is None or not hasattr(obj, name):
+            return None
+
+        value = getattr(obj, name)
+        if callable(value):
+            try:
+                value = value()
+            except TypeError:
+                return None
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _read_int_from_config(config, name):
+        if config is None:
+            return None
+
+        if isinstance(config, dict):
+            value = config.get(name)
+        else:
+            value = getattr(config, name, None)
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _deepspeed_engine(self):
+        if hasattr(self.model, "is_gradient_accumulation_boundary") or hasattr(
+            self.model, "gradient_accumulation_steps"
+        ):
+            return self.model
+        return None
+
+    def _deepspeed_plugin_config(self):
+        state = getattr(self.accelerator, "state", None)
+        plugin = getattr(state, "deepspeed_plugin", None)
+        if plugin is None:
+            plugin = getattr(self.accelerator, "deepspeed_plugin", None)
+        return getattr(plugin, "deepspeed_config", None)
+
+    def _resolve_gradient_accumulation_steps(self):
+        engine = self._deepspeed_engine()
+        steps = self._read_int_value(engine, "gradient_accumulation_steps")
+        if steps is not None:
+            return max(1, steps), "DeepSpeed engine"
+
+        for config in (getattr(engine, "config", None), self._deepspeed_plugin_config()):
+            steps = self._read_int_from_config(config, "gradient_accumulation_steps")
+            if steps is not None:
+                return max(1, steps), "DeepSpeed config"
+
+        return max(1, int(self.accelerator.gradient_accumulation_steps)), "Accelerate"
+
+    def _is_deepspeed_enabled(self):
+        return self._deepspeed_engine() is not None
+
+    def _is_optimizer_update_step(self):
+        engine = self._deepspeed_engine()
+        is_boundary = getattr(engine, "is_gradient_accumulation_boundary", None)
+        if callable(is_boundary):
+            return bool(is_boundary())
+        return bool(self.accelerator.sync_gradients)
+
     def _calculate_total_batch_size(self):
         """Calculate global batch size."""
+        engine = self._deepspeed_engine()
+        train_batch_size = self._read_int_value(engine, "train_batch_size")
+        if train_batch_size is not None:
+            return train_batch_size
+
         return (
             self.config.datasets.vla_data.per_device_batch_size
             * self.accelerator.num_processes
-            * self.accelerator.gradient_accumulation_steps
+            * self.gradient_accumulation_steps
         )
 
     def _init_wandb(self):
@@ -329,10 +413,10 @@ class VLATrainer(TrainerUtils):
             t_end_data = time.perf_counter()
 
             t_start_model = time.perf_counter()
-            step_metrics = self._train_step(batch_vla)
+            step_metrics, optimizer_update_step = self._train_step(batch_vla)
             t_end_model = time.perf_counter()
 
-            if self.accelerator.sync_gradients:
+            if optimizer_update_step:
                 progress_bar.update(1)
                 self.completed_steps += 1
 
@@ -344,14 +428,19 @@ class VLATrainer(TrainerUtils):
                     }
                 )
 
-            if self.completed_steps % self.config.trainer.eval_interval == 0:
+            if optimizer_update_step and self.completed_steps % self.config.trainer.eval_interval == 0:
                 step_metrics = self.eval_action_model(step_metrics)
 
             step_metrics["timing/data"] = t_end_data - t_start_data
             step_metrics["timing/model"] = t_end_model - t_start_model
-            self._log_metrics(step_metrics)
+            if optimizer_update_step:
+                self._log_metrics(step_metrics)
 
-            if self.completed_steps % self.config.trainer.save_interval == 0 and self.completed_steps > 0:
+            if (
+                optimizer_update_step
+                and self.completed_steps % self.config.trainer.save_interval == 0
+                and self.completed_steps > 0
+            ):
                 self._save_checkpoint()
 
             if self.completed_steps >= self.config.trainer.max_train_steps:
@@ -384,13 +473,20 @@ class VLATrainer(TrainerUtils):
             logger.info("***** Training Configuration *****")
             logger.info(f"  Total optimization steps = {self.config.trainer.max_train_steps}")
             logger.info(f"  Per device batch size = {self.config.datasets.vla_data.per_device_batch_size}")
-            logger.info(f"  Gradient accumulation steps = {self.accelerator.gradient_accumulation_steps}")
+            logger.info(f"  Gradient accumulation steps = {self.gradient_accumulation_steps}")
+            logger.info(f"  Gradient accumulation source = {self.gradient_accumulation_source}")
+            if self.gradient_accumulation_source != "Accelerate":
+                logger.info(
+                    f"  Accelerate outer gradient accumulation steps = "
+                    f"{self.accelerator.gradient_accumulation_steps}"
+                )
             logger.info(f"  Total batch size = {self.total_batch_size}")
 
     def _train_step(self, batch_vla, batch_vlm=None):
         """Execute single training step."""
         with self.accelerator.accumulate(self.model):
-            self.optimizer.zero_grad()
+            if not self._is_deepspeed_enabled():
+                self.optimizer.zero_grad()
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 output_dict = self.model.forward(batch_vla)
@@ -398,22 +494,21 @@ class VLATrainer(TrainerUtils):
                 total_loss = action_loss
 
             self.accelerator.backward(total_loss)
+            optimizer_update_step = self._is_optimizer_update_step()
 
-            if self.config.trainer.gradient_clipping is not None:
+            if optimizer_update_step and self.config.trainer.gradient_clipping is not None:
                 self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.trainer.gradient_clipping)
 
             self.optimizer.step()
-            # Only step the LR scheduler when gradients are actually synced
-            # (i.e., not mid-accumulation). Without this guard the scheduler
-            # runs gradient_accumulation_steps times faster than intended,
-            # causing warmup to end too early and cosine decay to bottom out
-            # at min_lr well before max_train_steps is reached.
-            if self.accelerator.sync_gradients:
+            # Step the scheduler only when the underlying optimizer updates.
+            # With DeepSpeed, Accelerate's outer sync flag can stay true while
+            # DeepSpeed is still accumulating micro-batches internally.
+            if optimizer_update_step:
                 self.lr_scheduler.step()
 
         return {
             "action_dit_loss": action_loss.item(),
-        }
+        }, optimizer_update_step
 
     def _finalize_training(self):
         """Training end processing."""

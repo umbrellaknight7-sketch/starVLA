@@ -166,10 +166,10 @@ def get_vla_dataset(
         data_cfg=data_cfg,
         **kwargs,
     )
-    # print(
-    #     f"[STARVLA_MARK] get_vla_dataset after LeRobotMixtureDataset rank={rank} pid={os.getpid()}",
-    #     flush=True,
-    # )
+    print(
+        f"[STARVLA_MARK] get_vla_dataset after LeRobotMixtureDataset rank={rank} pid={os.getpid()}",
+        flush=True,
+    )
     return mixture_dataset
 
 

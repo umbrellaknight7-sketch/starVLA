@@ -1,16 +1,16 @@
 #!/bin/bash
 # === Paths (adapted for this cluster) ===
-STARVLA_DIR=/home/jye624/Projcets/starVLA
+STARVLA_DIR=/home/xurui/starVLA
 
 cd ${STARVLA_DIR}
 # === Checkpoint ===
-CKPT=${STARVLA_DIR}/playground/Checkpoints/0405_libero4in1_CosmoPredict2GR00T/checkpoints/steps_50000_pytorch_model.pt
+CKPT=/data/checkpoints_rui/starVLA_results/1229_libero3vl4B_qwen3gr00t/final_model/pytorch_model.pt
 
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
-export LIBERO_HOME=/home/jye624/Projcets/LIBERO
+export LIBERO_HOME=/home/xurui/LIBERO
 export LIBERO_CONFIG_PATH=${LIBERO_HOME}/libero
-export LIBERO_Python=/home/jye624/.conda/envs/libero/bin/python
+export LIBERO_Python=/home/xurui/miniconda3/envs/libero/bin/python
 
 export PYTHONPATH=$PYTHONPATH:${LIBERO_HOME} # let eval_libero find the LIBERO tools
 export PYTHONPATH=$(pwd):${PYTHONPATH} # let LIBERO find the websocket tools from main repo
@@ -32,8 +32,8 @@ model_root=$(echo "$your_ckpt" | awk -F'/checkpoints/' '{print $1}')
 ###########################################################################################
 
 task_suite_name=libero_goal
-num_trials_per_task=50
-video_out_path="${model_root}/results/${task_suite_name}/${folder_name}"
+num_trials_per_task=20
+video_out_path="/home/xurui/starVLA/results/${task_suite_name}/${folder_name}"
 
 ${LIBERO_Python} ./examples/LIBERO/eval_files/eval_libero.py \
     --args.pretrained-path ${your_ckpt} \

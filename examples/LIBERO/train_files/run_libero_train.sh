@@ -1,18 +1,22 @@
 
+export CUDA_HOME=/usr/local/cuda-12.4
+export PATH=/usr/local/cuda-12.4/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}
 # Use only GPU 0 and GPU 1.
-export CUDA_VISIBLE_DEVICES=0,1
-export NUM_PROCESSES=2
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export NUM_PROCESSES=4
+export NCCL_P2P_LEVEL=PIX
 
 # Do not force a possibly wrong NIC / IB device.
-unset NCCL_SOCKET_IFNAME
-unset NCCL_IB_HCA
+# unset NCCL_SOCKET_IFNAME
+# unset NCCL_IB_HCA
 
 # Disable InfiniBand/RoCE for debugging.
 # NCCL will fall back to IP sockets.
-export NCCL_IB_DISABLE=1
+# export NCCL_IB_DISABLE=1
 
 # NCCL / PyTorch distributed debug settings.
-# export NCCL_DEBUG=INFO
+export NCCL_DEBUG=INFO
 # export TORCH_NCCL_BLOCKING_WAIT=1
 # export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 ###########################################################################################
@@ -41,17 +45,17 @@ cp $0 ${output_dir}/
 
 accelerate launch \
   --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml \
-  --num_processes 2 \
+  --num_processes 4 \
   starVLA/training/train_starvla.py \
   --config_yaml ${config_yaml} \
   --framework.name ${Framework_name} \
   --framework.qwenvl.base_vlm ${base_vlm} \
   --datasets.vla_data.data_root_dir ${libero_data_root}\
   --datasets.vla_data.data_mix ${data_mix} \
-  --datasets.vla_data.per_device_batch_size 64 \
+  --datasets.vla_data.per_device_batch_size 16 \
   --trainer.vla_data.video_backend torchvision_av \
   --trainer.freeze_modules ${freeze_module_list} \
-  --trainer.max_train_steps 40000 \
+  --trainer.max_train_steps 30000 \
   --trainer.save_interval 5000 \
   --trainer.logging_frequency 1000 \
   --trainer.eval_interval 2000 \
